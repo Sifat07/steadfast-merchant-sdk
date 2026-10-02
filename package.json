@@ -50,12 +50,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/sifat07/steadfast-merchant-sdk.git"
+    "url": "git+https://github.com/Sifat07/steadfast-merchant-sdk.git"
   },
   "bugs": {
-    "url": "https://github.com/sifat07/steadfast-merchant-sdk/issues"
+    "url": "https://github.com/Sifat07/steadfast-merchant-sdk/issues"
   },
-  "homepage": "https://github.com/sifat07/steadfast-merchant-sdk#readme",
+  "homepage": "https://github.com/Sifat07/steadfast-merchant-sdk#readme",
   "engines": {
     "node": ">=18.0.0"
   },
