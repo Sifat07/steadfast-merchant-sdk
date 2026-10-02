@@ -84,9 +84,9 @@ export class SteadfastClient {
     }
     const seen = new Set<string>();
     const data = orders.map((o, i) => {
-      if (seen.has(o.invoice)) throw new SteadfastError('validation', `duplicate invoice "${o.invoice}" at index ${i}`);
+      if (seen.has(o.invoice)) throw new SteadfastError('validation', `duplicate invoice at index ${i}`);
       seen.add(o.invoice);
-      return validateOrder(o, i);
+      return validateOrder(o);
     });
     let body: unknown;
     try {
@@ -157,7 +157,7 @@ export class SteadfastClient {
    */
   async createPickupRequest(req: CreatePickupRequest, opts?: CallOptions): Promise<PickupRequest> {
     const phone = normalizeBdPhone(req.contact_number);
-    if (!phone) throw new SteadfastError('validation', `contact_number "${req.contact_number}" is not a BD mobile number`);
+    if (!phone) throw new SteadfastError('validation', 'contact_number is not a valid BD mobile number');
     checkLength('address', req.address, 255);
     if (req.note !== undefined) checkLength('note', req.note, 500);
     const body = await this.request('POST', '/create_pickup_request', opts, { ...req, contact_number: phone });
@@ -222,7 +222,7 @@ export class SteadfastClient {
    */
   async getPayment(paymentId: string | number, opts?: CallOptions): Promise<Record<string, unknown>> {
     const digits = String(paymentId).replace(/\D/g, '');
-    if (!digits) throw new SteadfastError('validation', `payment id "${paymentId}" has no digits`);
+    if (!digits) throw new SteadfastError('validation', 'payment id has no digits');
     return (await this.request('GET', `/payments/${digits}`, opts)) as Record<string, unknown>;
   }
 
@@ -240,7 +240,7 @@ export class SteadfastClient {
    */
   async getFraudScore(phone: string, opts?: CallOptions): Promise<FraudScore> {
     const normalised = normalizeBdPhone(phone);
-    if (!normalised) throw new SteadfastError('validation', `"${phone}" is not a BD mobile number`);
+    if (!normalised) throw new SteadfastError('validation', 'phone is not a valid BD mobile number');
     const body = await this.request('GET', `/fraud_check/score/${normalised}`, opts);
     const { status: _status, ...score } = body as FraudScore & { status?: unknown };
     return score as FraudScore;
@@ -321,24 +321,23 @@ export class SteadfastClient {
   }
 }
 
-function validateOrder(order: CreateOrderRequest, index?: number): CreateOrderRequest {
-  const at = index === undefined ? '' : ` (order ${index})`;
+function validateOrder(order: CreateOrderRequest): CreateOrderRequest {
   const fail = (msg: string): never => {
-    throw new SteadfastError('validation', `${msg}${at}`);
+    throw new SteadfastError('validation', msg);
   };
   const invoice = order.invoice?.trim() ?? '';
   if (!invoice) fail('invoice is required');
-  if (!INVOICE_PATTERN.test(invoice)) fail(`invoice "${invoice}" may only contain letters, digits, - and _`);
+  if (!INVOICE_PATTERN.test(invoice)) fail('invoice may only contain letters, digits, - and _');
   if (invoice.length > FIELD_LIMITS.invoice) fail(`invoice is longer than ${FIELD_LIMITS.invoice} characters`);
   if (!order.recipient_name?.trim()) fail('recipient_name is required');
   if (!order.recipient_address?.trim()) fail('recipient_address is required');
-  checkLength('recipient_name', order.recipient_name, FIELD_LIMITS.recipient_name, at);
-  checkLength('recipient_address', order.recipient_address, FIELD_LIMITS.recipient_address, at);
-  if (order.note !== undefined) checkLength('note', order.note, FIELD_LIMITS.note, at);
+  checkLength('recipient_name', order.recipient_name, FIELD_LIMITS.recipient_name);
+  checkLength('recipient_address', order.recipient_address, FIELD_LIMITS.recipient_address);
+  if (order.note !== undefined) checkLength('note', order.note, FIELD_LIMITS.note);
   if (order.item_description !== undefined) {
-    checkLength('item_description', order.item_description, FIELD_LIMITS.item_description, at);
+    checkLength('item_description', order.item_description, FIELD_LIMITS.item_description);
   }
-  const phone = normalizeBdPhone(order.recipient_phone ?? '') ?? fail(`recipient_phone "${order.recipient_phone}" is not a BD mobile number`);
+  const phone = normalizeBdPhone(order.recipient_phone ?? '') ?? fail('recipient_phone is not a valid BD mobile number');
   if (!Number.isInteger(order.cod_amount) || order.cod_amount < 0 || order.cod_amount > FIELD_LIMITS.cod_amount) {
     fail(`cod_amount must be a whole number of taka from 0 to ${FIELD_LIMITS.cod_amount}`);
   }
@@ -346,14 +345,14 @@ function validateOrder(order: CreateOrderRequest, index?: number): CreateOrderRe
     fail('total_lot must be a positive whole number');
   }
   const alt = order.alternative_phone
-    ? (normalizeBdPhone(order.alternative_phone) ?? fail(`alternative_phone "${order.alternative_phone}" is not a BD mobile number`))
+    ? (normalizeBdPhone(order.alternative_phone) ?? fail('alternative_phone is not a valid BD mobile number'))
     : undefined;
   return { ...order, invoice, recipient_phone: phone, ...(alt === undefined ? {} : { alternative_phone: alt }) };
 }
 
-function checkLength(field: string, value: string, max: number, suffix = ''): void {
+function checkLength(field: string, value: string, max: number): void {
   if (value.length > max) {
-    throw new SteadfastError('validation', `${field} is longer than ${max} characters (Steadfast would truncate it)${suffix}`);
+    throw new SteadfastError('validation', `${field} is longer than ${max} characters (Steadfast would truncate it)`);
   }
 }
 
