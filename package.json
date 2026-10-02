@@ -1,6 +1,6 @@
 {
   "name": "steadfast-merchant-sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Unofficial, zero-dependency TypeScript SDK for the Steadfast Courier merchant API",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
