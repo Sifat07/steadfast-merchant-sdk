@@ -105,6 +105,11 @@ export class SteadfastClient {
 
   // ─── Status ────────────────────────────────────────────────────────────
 
+  /**
+   * Where a parcel is now, by the `consignment_id` Steadfast returned at
+   * booking. Answers are cached by Steadfast for 60 s. For a parcel that is
+   * coming back, use `getStatusWithReturnByConsignmentId` instead.
+   */
   getStatusByConsignmentId(consignmentId: number | string, opts?: CallOptions): Promise<DeliveryStatus> {
     return this.status(`/status_by_cid/${seg(consignmentId)}`, opts);
   }
@@ -114,6 +119,7 @@ export class SteadfastClient {
     return this.status(`/status_by_invoice/${seg(invoice)}`, opts);
   }
 
+  /** Same answer as `getStatusByConsignmentId`, by the customer-facing tracking code. */
   getStatusByTrackingCode(trackingCode: string, opts?: CallOptions): Promise<DeliveryStatus> {
     return this.status(`/status_by_trackingcode/${seg(trackingCode)}`, opts);
   }
@@ -178,6 +184,11 @@ export class SteadfastClient {
     return unwrapObject<ReturnRequest>(body, 'create_return_request');
   }
 
+  /**
+   * One return request by the `id` from `createReturnRequest`. Steadfast's
+   * guide says the answer includes the parcel it's about; the extra fields
+   * aren't typed yet, so they're present at runtime but not in `ReturnRequest`.
+   */
   async getReturnRequest(id: number, opts?: CallOptions): Promise<ReturnRequest> {
     const body = await this.request('GET', `/get_return_request/${seg(id)}`, opts);
     return unwrapObject<ReturnRequest>(body, 'get_return_request');

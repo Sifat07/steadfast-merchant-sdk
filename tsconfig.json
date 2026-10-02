@@ -14,7 +14,11 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "isolatedModules": true,
-    "noEmit": true
+    "noEmit": true,
+    "paths": {
+      "steadfast-merchant-sdk": ["./src/index.ts"],
+      "steadfast-merchant-sdk/webhooks": ["./src/webhooks.ts"]
+    }
   },
-  "include": ["src", "tests", "scripts"]
+  "include": ["src", "tests", "scripts", "examples"]
 }
