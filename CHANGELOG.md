@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.1](https://github.com/Sifat07/steadfast-merchant-sdk/compare/v0.1.0...v0.1.1) (2026-10-02)
+
+
+### Bug Fixes
+
+* don't echo customer data in validation errors ([fe745be](https://github.com/Sifat07/steadfast-merchant-sdk/commit/fe745be9bcee68a2f6df7e37584cc14adebe810d))
+* one invalid order no longer fails a whole bulk request ([fc136df](https://github.com/Sifat07/steadfast-merchant-sdk/commit/fc136df31e8be6c3d8f939dc5456671950f4fe0b))
+* resolve ./webhooks types under node10 moduleResolution ([9046ce4](https://github.com/Sifat07/steadfast-merchant-sdk/commit/9046ce44058842fb61848be5627f44c3ceb59217))
+
 ## 0.1.0 (2026-10-02)
 
 - Docs: full README (lifecycle, per-method reference, errors, webhooks, what is verified), runnable `examples/`, CONTRIBUTING.
