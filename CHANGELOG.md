@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## 0.1.0 (2026-10-02)
 
 - Docs: full README (lifecycle, per-method reference, errors, webhooks, what is verified), runnable `examples/`, CONTRIBUTING.
 - First version: all 18 endpoints from the 2026 API guide, signed webhooks, typed errors.
