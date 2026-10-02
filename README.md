@@ -152,9 +152,9 @@ Steadfast also replaces some characters (`<`, `>`, `;` and a few others) with sp
 
 #### `createBulkOrders(orders)`
 
-`POST /create_order/bulk-order/extended` — book up to 500 parcels in one call. Every order is validated, and invoices must be unique within the batch, before anything is sent.
+`POST /create_order/bulk-order/extended` — book up to 500 parcels in one call. Every order is validated before anything is sent. An order that fails validation does **not** fail the batch: it comes back as `{ ok: false, invoice, errors }` and only the valid orders are sent. If none are valid, nothing is sent. An empty list, more than 500 orders, or a duplicate invoice still throws (`validation`).
 
-The call succeeds even when some orders fail. Results come back **in the order sent**, one per order:
+The call succeeds even when some orders fail. Results come back **in the order given**, one per order:
 
 ```ts
 const results = await steadfast.createBulkOrders(orders);

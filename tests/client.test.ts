@@ -104,6 +104,37 @@ describe('SteadfastClient', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('books the valid orders and returns the invalid ones as failed rows, aligned by invoice', async () => {
+    const { sf, call, fetchMock } = client({
+      body: {
+        status: 200,
+        data: [
+          { invoice: 'INV-3', status: 'success', consignment_id: 3, tracking_code: 'T3' },
+          { invoice: 'INV-1', status: 'success', consignment_id: 1, tracking_code: 'T1' },
+        ],
+      },
+    });
+    const rows = await sf.createBulkOrders([
+      order,
+      { ...order, invoice: 'INV-2', recipient_phone: '12345' },
+      { ...order, invoice: 'INV-3' },
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(call().json.data.map((o: { invoice: string }) => o.invoice)).toEqual(['INV-1', 'INV-3']);
+    expect(rows.map((r) => [r.invoice, r.ok])).toEqual([['INV-1', true], ['INV-2', false], ['INV-3', true]]);
+    expect(rows[1]).toEqual({ ok: false, invoice: 'INV-2', errors: ['recipient_phone is not a valid BD mobile number'] });
+  });
+
+  it('does not call the API when every bulk order is invalid', async () => {
+    const { sf, fetchMock } = client();
+    const rows = await sf.createBulkOrders([
+      { ...order, recipient_phone: '12345' },
+      { ...order, invoice: 'INV-2', cod_amount: 1.5 },
+    ]);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(rows.map((r) => [r.invoice, r.ok])).toEqual([['INV-1', false], ['INV-2', false]]);
+  });
+
   it('keeps customer data out of validation messages', async () => {
     const { sf } = client();
     const secrets = ['01999', '99999999', 'SECRET/INV', 'Secret Name'];

@@ -74,8 +74,13 @@ export class SteadfastClient {
   /**
    * Book up to 500 parcels. Uses the `extended` endpoint, which returns error
    * messages instead of codes and honours per-order optional fields. Results
-   * come back in the order sent. Partial success is normal: re-send only the
-   * failures, keeping their invoices.
+   * come back in the order given, one per order. Partial success is normal:
+   * re-send only the failures, keeping their invoices.
+   *
+   * An order that fails this SDK's validation does not fail the batch: it comes
+   * back as `{ ok: false, errors }` and is not sent. If none are valid, nothing
+   * is sent at all. Only request-level problems throw: an empty list, more than
+   * 500 orders, or a duplicate invoice.
    */
   async createBulkOrders(orders: CreateOrderRequest[], opts?: CallOptions): Promise<BulkOrderResult[]> {
     if (orders.length === 0) throw new SteadfastError('validation', 'orders is empty');
@@ -83,11 +88,21 @@ export class SteadfastClient {
       throw new SteadfastError('validation', `at most ${BULK_ORDER_LIMIT} orders per bulk call (got ${orders.length})`);
     }
     const seen = new Set<string>();
-    const data = orders.map((o, i) => {
-      if (seen.has(o.invoice)) throw new SteadfastError('validation', `duplicate invoice at index ${i}`);
-      seen.add(o.invoice);
-      return validateOrder(o);
+    const checked = orders.map((o, i) => {
+      const key = o.invoice?.trim();
+      if (key) {
+        if (seen.has(key)) throw new SteadfastError('validation', `duplicate invoice at index ${i}`);
+        seen.add(key);
+      }
+      try {
+        return { order: validateOrder(o) };
+      } catch (e) {
+        if (!(e instanceof SteadfastError)) throw e;
+        return { failed: { ok: false, invoice: key ?? '', errors: [e.message] } as BulkOrderResult };
+      }
     });
+    const data = checked.flatMap((c) => (c.order ? [c.order] : []));
+    if (data.length === 0) return checked.map((c) => c.failed!);
     let body: unknown;
     try {
       body = await this.request('POST', '/create_order/bulk-order/extended', opts, { data });
@@ -100,7 +115,12 @@ export class SteadfastClient {
     }
     const rows = Array.isArray(body) ? body : (body as { data?: unknown }).data;
     if (!Array.isArray(rows)) throw unexpected('bulk-order response has no data list', body);
-    return rows.map(toBulkResult);
+    const sent = new Map(rows.map(toBulkResult).map((r) => [r.invoice, r]));
+    return checked.map(
+      (c) =>
+        c.failed ??
+        sent.get(c.order!.invoice) ?? { ok: false, invoice: c.order!.invoice, errors: ['no result returned for this order'] },
+    );
   }
 
   // ─── Status ────────────────────────────────────────────────────────────
