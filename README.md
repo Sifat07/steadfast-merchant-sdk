@@ -1,5 +1,6 @@
 # Steadfast Merchant SDK
 
+[![npm](https://img.shields.io/npm/v/steadfast-merchant-sdk)](https://www.npmjs.com/package/steadfast-merchant-sdk)
 [![CI](https://github.com/Sifat07/steadfast-merchant-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/Sifat07/steadfast-merchant-sdk/actions/workflows/ci.yml)
 [![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -50,12 +51,6 @@ An **unofficial**, zero-dependency TypeScript SDK for the [Steadfast Courier](ht
 pnpm add steadfast-merchant-sdk
 # or
 npm install steadfast-merchant-sdk
-```
-
-Not on npm yet? Install from GitHub:
-
-```bash
-pnpm add github:sifat07/steadfast-merchant-sdk
 ```
 
 ## Quick start
