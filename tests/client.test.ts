@@ -104,6 +104,28 @@ describe('SteadfastClient', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('keeps customer data out of validation messages', async () => {
+    const { sf } = client();
+    const secrets = ['01999', '99999999', 'SECRET/INV', 'Secret Name'];
+    const msgs: string[] = [];
+    const grab = async (p: Promise<unknown>) => {
+      await p.then(
+        () => expect.unreachable(),
+        (e: Error) => msgs.push(e.message),
+      );
+    };
+    await grab(sf.createOrder({ ...order, recipient_phone: '01999' }));
+    await grab(sf.createOrder({ ...order, alternative_phone: '99999999' }));
+    await grab(sf.createOrder({ ...order, invoice: 'SECRET/INV' }));
+    await grab(sf.createOrder({ ...order, recipient_name: 'Secret Name'.padEnd(500, 'x') }));
+    await grab(sf.createPickupRequest({ address_id: 1, police_station_id: 1, address: 'a', contact_number: '01999' }));
+    await grab(sf.getFraudScore('01999'));
+    await grab(sf.getPayment('SECRET'));
+    expect(msgs).toHaveLength(7);
+    for (const m of msgs) for (const secret of secrets) expect(m).not.toContain(secret);
+    expect(msgs[0]).toBe('recipient_phone is not a valid BD mobile number');
+  });
+
   it('enforces the limits Steadfast would silently truncate to', async () => {
     const { sf, fetchMock } = client();
     await expect(sf.createOrder({ ...order, invoice: 'ORD/1' })).rejects.toThrow(/letters, digits/);

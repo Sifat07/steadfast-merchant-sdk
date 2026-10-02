@@ -157,7 +157,7 @@ export function verifySteadfastWebhook(
 function taka(value: unknown, field: string, fail: (msg: string) => never): number {
   if (value === undefined || value === null || value === '') return 0;
   const n = typeof value === 'string' ? Number(value.trim()) : value;
-  if (typeof n !== 'number' || !Number.isFinite(n) || n < 0) return fail(`unusable ${field} ${JSON.stringify(value)}`);
+  if (typeof n !== 'number' || !Number.isFinite(n) || n < 0) return fail(`unusable ${field}`);
   return n;
 }
 
