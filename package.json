@@ -1,0 +1,74 @@
+{
+  "name": "steadfast-merchant-sdk",
+  "version": "0.1.0",
+  "description": "Unofficial, zero-dependency TypeScript SDK for the Steadfast Courier merchant API",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    },
+    "./webhooks": {
+      "types": "./dist/webhooks.d.ts",
+      "import": "./dist/webhooks.mjs",
+      "require": "./dist/webhooks.js"
+    }
+  },
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "prepare": "tsup",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "type-check": "tsc --noEmit",
+    "smoke": "node --env-file=.env scripts/smoke.mjs",
+    "prepublishOnly": "pnpm run type-check && pnpm run test && pnpm run build"
+  },
+  "keywords": [
+    "steadfast",
+    "packzy",
+    "courier",
+    "delivery",
+    "bangladesh",
+    "shipping",
+    "logistics",
+    "ecommerce",
+    "webhook",
+    "sdk"
+  ],
+  "author": "Sifat Jasim <sifatjasim@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sifat07/steadfast-merchant-sdk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/sifat07/steadfast-merchant-sdk/issues"
+  },
+  "homepage": "https://github.com/sifat07/steadfast-merchant-sdk#readme",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "packageManager": "pnpm@10.14.0",
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}
