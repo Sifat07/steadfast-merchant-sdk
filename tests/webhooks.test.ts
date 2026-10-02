@@ -52,12 +52,24 @@ describe('verifySteadfastWebhook', () => {
     expect(verifySteadfastWebhook(JSON.stringify(JSON.parse(rawBody), null, 2), headers, TOKEN)).toBe(false);
   });
 
-  it('rejects a wrong token, a missing signature or a missing bearer', () => {
+  it('rejects a wrong token or a missing bearer', () => {
     const { rawBody, headers } = signed(deliveryStatus, 'someone-else');
     expect(verifySteadfastWebhook(rawBody, headers, TOKEN)).toBe(false);
     const good = signed(deliveryStatus);
-    expect(verifySteadfastWebhook(good.rawBody, { ...good.headers, 'x-signature': undefined }, TOKEN)).toBe(false);
     expect(verifySteadfastWebhook(good.rawBody, { ...good.headers, authorization: undefined }, TOKEN)).toBe(false);
+  });
+
+  it('accepts bearer-only by default, but not with requireSignature', () => {
+    const { rawBody, headers } = signed(deliveryStatus);
+    const bearerOnly = { ...headers, 'x-signature': undefined };
+    expect(verifySteadfastWebhook(rawBody, bearerOnly, TOKEN)).toBe(true);
+    expect(verifySteadfastWebhook(rawBody, bearerOnly, TOKEN, { requireSignature: true })).toBe(false);
+    expect(verifySteadfastWebhook(rawBody, headers, TOKEN, { requireSignature: true })).toBe(true);
+  });
+
+  it('rejects a present-but-wrong signature even with a good bearer', () => {
+    const { rawBody, headers } = signed(deliveryStatus);
+    expect(verifySteadfastWebhook(rawBody, { ...headers, 'x-signature': 'ab'.repeat(32) }, TOKEN)).toBe(false);
   });
 
   it('refuses to run without a configured token', () => {
@@ -96,13 +108,29 @@ describe('parseSteadfastWebhook', () => {
     },
   );
 
+  it('keeps statuses as sent instead of rewriting or rejecting them', () => {
+    for (const status of ['delivered_approval_pending', 'hold', 'some_future_status']) {
+      expect(parseSteadfastWebhook({ ...deliveryStatus, status })).toMatchObject({ status });
+    }
+  });
+
+  it('accepts numeric-string amounts', () => {
+    expect(parseSteadfastWebhook({ ...deliveryStatus, cod_amount: '1500.00', delivery_charge: '100' })).toMatchObject({
+      cod_amount: 1500,
+      delivery_charge: 100,
+    });
+  });
+
   it.each([
     [null, /not an object/],
     [[], /not an object/],
     [{ ...deliveryStatus, notification_type: undefined }, /notification_type/],
     [{ ...deliveryStatus, consignment_id: undefined }, /consignment_id/],
     [{ ...deliveryStatus, invoice: 5 }, /invoice/],
-    [{ ...deliveryStatus, status: 'teleported' }, /unknown status/],
+    [{ ...deliveryStatus, status: '' }, /status is missing/],
+    [{ ...deliveryStatus, cod_amount: 'abc' }, /unusable cod_amount/],
+    [{ ...deliveryStatus, cod_amount: -5 }, /unusable cod_amount/],
+    [{ ...deliveryStatus, delivery_charge: {} }, /unusable delivery_charge/],
   ])('rejects malformed payload %#', (body, msg) => {
     expect(() => parseSteadfastWebhook(body)).toThrow(msg);
   });

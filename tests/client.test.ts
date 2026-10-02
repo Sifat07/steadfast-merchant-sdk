@@ -78,6 +78,25 @@ describe('SteadfastClient', () => {
     ]);
   });
 
+  it('retries a bulk call once with JSON-encoded data if Steadfast answers 400 to the array form', async () => {
+    const { sf, call, fetchMock } = client(
+      { status: 400, body: { message: 'The data field is required.' } },
+      { body: { status: 200, data: [{ invoice: 'INV-1', status: 'success', consignment_id: 1, tracking_code: 'T' }] } },
+    );
+    await expect(sf.createBulkOrders([order])).resolves.toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(Array.isArray(call(0).json.data)).toBe(true);
+    expect(typeof call(1).json.data).toBe('string');
+  });
+
+  it('does not retry a bulk call on 422, 401 or 5xx', async () => {
+    for (const status of [422, 401, 503]) {
+      const { sf, fetchMock } = client({ status, body: { message: 'no' } });
+      await expect(sf.createBulkOrders([order])).rejects.toBeDefined();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    }
+  });
+
   it('rejects duplicate invoices and more than 500 orders before sending', async () => {
     const { sf, fetchMock } = client();
     await expect(sf.createBulkOrders([order, order])).rejects.toThrow(/duplicate invoice/);
@@ -204,6 +223,22 @@ describe('SteadfastClient', () => {
     expect(call().url).toMatch(/\/fraud_check\/score\/01712345678$/);
     expect(score).not.toHaveProperty('status');
     expect(score.delivery_ratio).toBeNull();
+  });
+
+  it('never follows redirects, so keys cannot leak to another host', async () => {
+    const { sf, call } = client({ body: { status: 200, current_balance: 1 } });
+    await sf.getBalance();
+    expect(call().init.redirect).toBe('error');
+  });
+
+  it('treats a non-JSON 2xx (proxy/CDN page) as retryable, not final', async () => {
+    const { sf } = client({ body: '<html>cloudflare</html>' });
+    await expect(sf.createOrder(order)).rejects.toMatchObject({ kind: 'unavailable', retryable: true });
+  });
+
+  it('accepts a bare-array bulk response (older endpoint shape)', async () => {
+    const { sf } = client({ body: [{ invoice: 'INV-1', status: 'success', consignment_id: 1, tracking_code: 'T' }] });
+    await expect(sf.createBulkOrders([order])).resolves.toMatchObject([{ ok: true, consignment_id: 1 }]);
   });
 
   it('reads the balance', async () => {

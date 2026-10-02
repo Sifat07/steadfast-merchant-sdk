@@ -4,7 +4,7 @@ An **unofficial**, zero-dependency TypeScript SDK for the [Steadfast Courier](ht
 
 > Community-maintained. Not affiliated with or endorsed by Steadfast Courier Ltd.
 
-- Node.js ≥ 18 (uses built-in `fetch`), ESM and CommonJS
+- Node.js ≥ 18 at runtime (built-in `fetch`), ESM and CommonJS. Developing the SDK needs Node ≥ 22
 - Covers all 18 endpoints in Steadfast's 2026 API guide
 - Validates input before sending, because Steadfast **truncates** over-long values instead of rejecting them
 - Typed errors with a `kind` you can branch on, including `duplicate` for safe retries
@@ -84,7 +84,7 @@ There are no automatic retries. Retrying a create with the **same invoice** is s
 
 ## Webhooks
 
-Set a callback URL and an **auth token** in the merchant panel (Webhook page). Steadfast signs every request with `X-Signature` (an HMAC-SHA256 of the raw body, keyed with your token) and also sends `Authorization: Bearer <token>`.
+Set a callback URL and an **auth token** in the merchant panel (Webhook page). Steadfast sends `Authorization: Bearer <token>`, which is always checked. The 2026 panel guide also documents `X-Signature`, an HMAC-SHA256 of the raw body keyed with your token. It's verified whenever it's present. It's only *required* if you pass `requireSignature: true`. Turn that on once you've seen the header on your own live events: Steadfast never retries a 4xx, so requiring a header that doesn't arrive would drop every event.
 
 ```ts
 import { handleSteadfastWebhook, isDeliveryStatusEvent } from 'steadfast-merchant-sdk/webhooks';
@@ -99,7 +99,7 @@ if (result.ok) {
 reply.status(result.httpStatus).send(result.response);
 ```
 
-Answer within 5 seconds. Steadfast retries a 5xx or a timeout after 30 seconds and again after 2 minutes, and never retries a 4xx. `delivery_status` and `tracking_update` are typed. The other events (`consignment_update`, `return_list_accepted`, `payment_request`, `cancel_request`, `return_request`, `pickup_request`, `user_update`) arrive as `{ notification_type, raw }` until Steadfast documents their payloads.
+Statuses are passed through exactly as sent (lower-cased), including `*_approval_pending` and anything new, never rewritten or rejected. Amounts may arrive as numbers or numeric strings. Anything else is refused. Answer within 5 seconds. Steadfast retries a 5xx or a timeout after 30 seconds and again after 2 minutes, and never retries a 4xx. `delivery_status` and `tracking_update` are typed. The other events (`consignment_update`, `return_list_accepted`, `payment_request`, `cancel_request`, `return_request`, `pickup_request`, `user_update`) arrive as `{ notification_type, raw }` until Steadfast documents their payloads.
 
 ## Development
 

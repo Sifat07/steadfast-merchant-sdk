@@ -14,8 +14,15 @@
  * 30 s and 2 min (3 attempts in all); a 4xx is never retried. So: verify,
  * record the event by Idempotency-Key, answer 200, and do slow work after.
  *
- * The auth token is optional in the merchant panel. Without one there is no
- * signature, and this module refuses every request — set a token.
+ * The auth token is optional in the merchant panel. Without one there is
+ * nothing to check, and this module refuses every request — set a token.
+ *
+ * The Bearer token is always required. `X-Signature` is documented in the
+ * 2026 panel guide but not by Steadfast's own Laravel package or any other
+ * integration seen so far, so by default it is checked when present and not
+ * required when absent. Pass `requireSignature: true` once you have seen it
+ * on your live events: a 4xx is never retried, so requiring a header that
+ * doesn't arrive would silently drop every event.
  *
  * @example Fastify
  * ```ts
@@ -33,7 +40,7 @@
  * ```
  */
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { isDeliveryStatus } from './types';
+import type { DeliveryStatus } from './types';
 
 export class SteadfastWebhookError extends Error {
   constructor(
@@ -47,14 +54,19 @@ export class SteadfastWebhookError extends Error {
 
 // ─── Events ──────────────────────────────────────────────────────────────
 
-/** Statuses a `delivery_status` webhook can carry (a subset of DeliveryStatus). */
-export type WebhookDeliveryStatus = 'pending' | 'delivered' | 'partial_delivered' | 'cancelled' | 'unknown';
+/**
+ * Documented webhook statuses are pending, delivered, partial_delivered,
+ * cancelled and unknown. Anything else (including the `*_approval_pending`
+ * family) is passed through as sent, lower-cased, never rewritten.
+ */
+export type WebhookDeliveryStatus = DeliveryStatus | (string & {});
 
 export interface DeliveryStatusEvent {
   notification_type: 'delivery_status';
   consignment_id: number;
   invoice: string;
   status: WebhookDeliveryStatus;
+  /** Taka. For `partial_delivered`, what the rider actually collected. */
   cod_amount: number;
   delivery_charge: number;
   tracking_message?: string;
@@ -115,22 +127,39 @@ export function signSteadfastWebhook(rawBody: string | Uint8Array, token: string
   return createHmac('sha256', token).update(rawBody).digest('hex');
 }
 
+export interface VerifyOptions {
+  /** Reject requests without `X-Signature`. Default false — see the module docs. */
+  requireSignature?: boolean;
+}
+
 /**
- * Check `X-Signature` against the raw body, and `Authorization` against the
- * token. Both must match. Constant-time.
+ * Check `Authorization: Bearer` against the token (always) and `X-Signature`
+ * against the raw body (when present, or always with `requireSignature`).
+ * Constant-time.
  */
-export function verifySteadfastWebhook(rawBody: string | Uint8Array, headers: Headers, token: string): boolean {
+export function verifySteadfastWebhook(
+  rawBody: string | Uint8Array,
+  headers: Headers,
+  token: string,
+  { requireSignature = false }: VerifyOptions = {},
+): boolean {
   if (!token) throw new Error('Steadfast webhook token is not configured');
-  const signature = header(headers, 'x-signature')?.trim().toLowerCase() ?? '';
   const bearer = /^Bearer\s+(.+)$/i.exec(header(headers, 'authorization')?.trim() ?? '')?.[1] ?? '';
-  const signatureOk = safeEqual(signature, signSteadfastWebhook(rawBody, token));
-  const bearerOk = safeEqual(bearer, token);
-  return signatureOk && bearerOk;
+  if (!safeEqual(bearer, token)) return false;
+  const signature = header(headers, 'x-signature')?.trim().toLowerCase();
+  if (!signature) return !requireSignature;
+  return safeEqual(signature, signSteadfastWebhook(rawBody, token));
 }
 
 // ─── Parsing ─────────────────────────────────────────────────────────────
 
-const WEBHOOK_STATUSES: readonly string[] = ['pending', 'delivered', 'partial_delivered', 'cancelled', 'unknown'];
+/** Taka as Steadfast sends it: a number or a numeric string. Refuses anything else. */
+function taka(value: unknown, field: string, fail: (msg: string) => never): number {
+  if (value === undefined || value === null || value === '') return 0;
+  const n = typeof value === 'string' ? Number(value.trim()) : value;
+  if (typeof n !== 'number' || !Number.isFinite(n) || n < 0) return fail(`unusable ${field} ${JSON.stringify(value)}`);
+  return n;
+}
 
 /** Type a webhook body. Throws SteadfastWebhookError on a malformed payload. */
 export function parseSteadfastWebhook(body: unknown): SteadfastWebhookEvent {
@@ -161,15 +190,15 @@ export function parseSteadfastWebhook(body: unknown): SteadfastWebhookEvent {
     };
   }
 
-  const status = typeof b.status === 'string' ? b.status.toLowerCase() : '';
-  if (!WEBHOOK_STATUSES.includes(status) && !isDeliveryStatus(status)) fail(`unknown status ${JSON.stringify(b.status)}`);
+  const status = typeof b.status === 'string' ? b.status.trim().toLowerCase() : '';
+  if (!status) fail('status is missing');
   return {
     notification_type: 'delivery_status',
     consignment_id: consignmentId,
     invoice: b.invoice as string,
-    status: (WEBHOOK_STATUSES.includes(status) ? status : 'unknown') as WebhookDeliveryStatus,
-    cod_amount: Number(b.cod_amount ?? 0),
-    delivery_charge: Number(b.delivery_charge ?? 0),
+    status,
+    cod_amount: taka(b.cod_amount, 'cod_amount', fail),
+    delivery_charge: taka(b.delivery_charge, 'delivery_charge', fail),
     ...(typeof b.tracking_message === 'string' ? { tracking_message: b.tracking_message } : {}),
     updated_at: updatedAt,
   };
@@ -192,12 +221,15 @@ export type WebhookResult =
  * Verify, parse, and get back the reply to send. Failures answer 4xx, which
  * Steadfast does not retry — a bad signature or payload won't improve.
  */
-export function handleSteadfastWebhook(input: {
-  rawBody: string | Uint8Array;
-  headers: Headers;
-  token: string;
-}): WebhookResult {
-  if (!verifySteadfastWebhook(input.rawBody, input.headers, input.token)) {
+export function handleSteadfastWebhook(
+  input: {
+    rawBody: string | Uint8Array;
+    headers: Headers;
+    token: string;
+  } & VerifyOptions,
+): WebhookResult {
+  const options = input.requireSignature === undefined ? {} : { requireSignature: input.requireSignature };
+  if (!verifySteadfastWebhook(input.rawBody, input.headers, input.token, options)) {
     const error = new SteadfastWebhookError('unauthorized', 'bad or missing signature / bearer token');
     return { ok: false, error, httpStatus: 401, response: { status: 'error', message: 'Unauthorized' } };
   }

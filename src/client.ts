@@ -88,8 +88,17 @@ export class SteadfastClient {
       seen.add(o.invoice);
       return validateOrder(o, i);
     });
-    const body = await this.request('POST', '/create_order/bulk-order/extended', opts, { data });
-    const rows = (body as { data?: unknown }).data;
+    let body: unknown;
+    try {
+      body = await this.request('POST', '/create_order/bulk-order/extended', opts, { data });
+    } catch (e) {
+      // The 2026 guide documents `data` as an array; Steadfast's own Laravel
+      // package sends it JSON-encoded. A 400 means the request wasn't
+      // understood, so nothing was booked — retry once in the other encoding.
+      if (!(e instanceof SteadfastError) || e.httpStatus !== 400 || e.kind !== 'validation') throw e;
+      body = await this.request('POST', '/create_order/bulk-order/extended', opts, { data: JSON.stringify(data) });
+    }
+    const rows = Array.isArray(body) ? body : (body as { data?: unknown }).data;
     if (!Array.isArray(rows)) throw unexpected('bulk-order response has no data list', body);
     return rows.map(toBulkResult);
   }
@@ -253,6 +262,9 @@ export class SteadfastClient {
           ...(json === undefined ? {} : { 'Content-Type': 'application/json' }),
         },
         ...(json === undefined ? {} : { body: JSON.stringify(json) }),
+        // Api-Key / Secret-Key are custom headers, which fetch forwards to a
+        // redirect target. Steadfast doesn't redirect its API; refuse to.
+        redirect: 'error',
         signal,
       });
     } catch (cause) {
@@ -277,7 +289,14 @@ export class SteadfastClient {
       });
     }
     if (!auth) return body;
-    if (typeof body !== 'object' || body === null) throw unexpected(`non-JSON response from ${path}`, body);
+    if (typeof body !== 'object' || body === null) {
+      // A 2xx that isn't JSON (a proxy or CDN page) is no verdict: a create
+      // may or may not have landed. Retrying with the same invoice is safe.
+      throw new SteadfastError('unavailable', `non-JSON ${res.status} response from ${path}`, {
+        httpStatus: res.status,
+        body,
+      });
+    }
 
     // Some endpoints answer HTTP 200 with the real code in the body.
     const inner = (body as { status?: unknown }).status;
