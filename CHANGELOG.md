@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.2](https://github.com/Sifat07/steadfast-merchant-sdk/compare/v0.1.1...v0.1.2) (2026-10-11)
+
+
+### Bug Fixes
+
+* stop dropping webhook events on a missing type or signature mismatch ([#10](https://github.com/Sifat07/steadfast-merchant-sdk/issues/10)) ([e3cccdb](https://github.com/Sifat07/steadfast-merchant-sdk/commit/e3cccdb17db17c4d66ed1ec28dfe8e4904c63a39))
+* time out stalled replies, and stop guessing at webhook ids and amounts ([#11](https://github.com/Sifat07/steadfast-merchant-sdk/issues/11)) ([4f583e9](https://github.com/Sifat07/steadfast-merchant-sdk/commit/4f583e9abb50c4e412ad4ea9b66d5c03ce2010fb))
+
 ## [0.1.1](https://github.com/Sifat07/steadfast-merchant-sdk/compare/v0.1.0...v0.1.1) (2026-10-02)
 
 
