@@ -2,7 +2,8 @@
   "packages": {
     ".": {
       "release-type": "node",
-      "include-component-in-tag": false
+      "include-component-in-tag": false,
+      "bump-minor-pre-major": true
     }
   }
 }
