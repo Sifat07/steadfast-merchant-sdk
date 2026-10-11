@@ -17,12 +17,14 @@
  * The auth token is optional in the merchant panel. Without one there is
  * nothing to check, and this module refuses every request — set a token.
  *
- * The Bearer token is always required. `X-Signature` is documented in the
- * 2026 panel guide but not by Steadfast's own Laravel package or any other
- * integration seen so far, so by default it is checked when present and not
- * required when absent. Pass `requireSignature: true` once you have seen it
- * on your live events: a 4xx is never retried, so requiring a header that
- * doesn't arrive would silently drop every event.
+ * The Bearer token is always required, and it is the authentication.
+ * `X-Signature` is keyed with that same token, so a matching signature proves
+ * nothing the Bearer check didn't. Its recipe comes only from the 2026 panel
+ * guide, not from live traffic, and a misread detail (or a framework that
+ * re-serialises the body) would fail every event with a 4xx that is never
+ * retried. So by default it is not enforced: `handleSteadfastWebhook` reports
+ * it as `signature: 'valid' | 'invalid' | 'absent'` for you to log. Pass
+ * `requireSignature: true` once your live events show `'valid'`.
  *
  * @example Fastify
  * ```ts
@@ -66,7 +68,11 @@ export interface DeliveryStatusEvent {
   consignment_id: number;
   invoice: string;
   status: WebhookDeliveryStatus;
-  /** Taka. For `partial_delivered`, what the rider actually collected. */
+  /**
+   * Taka. For `partial_delivered`, what the rider actually collected.
+   * Passed through as sent: bookings take whole taka, but nothing guarantees
+   * a push does, so check `Number.isInteger` before settling against it.
+   */
   cod_amount: number;
   delivery_charge: number;
   tracking_message?: string;
@@ -128,14 +134,22 @@ export function signSteadfastWebhook(rawBody: string | Uint8Array, token: string
 }
 
 export interface VerifyOptions {
-  /** Reject requests without `X-Signature`. Default false — see the module docs. */
+  /** Reject requests without a valid `X-Signature`. Default false — see the module docs. */
   requireSignature?: boolean;
 }
 
+export type SignatureCheck = 'valid' | 'invalid' | 'absent';
+
+/** Compare `X-Signature` with the raw body. Constant-time. */
+export function checkSteadfastSignature(rawBody: string | Uint8Array, headers: Headers, token: string): SignatureCheck {
+  const signature = header(headers, 'x-signature')?.trim().toLowerCase();
+  if (!signature) return 'absent';
+  return safeEqual(signature, signSteadfastWebhook(rawBody, token)) ? 'valid' : 'invalid';
+}
+
 /**
- * Check `Authorization: Bearer` against the token (always) and `X-Signature`
- * against the raw body (when present, or always with `requireSignature`).
- * Constant-time.
+ * Check `Authorization: Bearer` against the token (always), and `X-Signature`
+ * against the raw body only with `requireSignature`. Constant-time.
  */
 export function verifySteadfastWebhook(
   rawBody: string | Uint8Array,
@@ -146,9 +160,7 @@ export function verifySteadfastWebhook(
   if (!token) throw new Error('Steadfast webhook token is not configured');
   const bearer = /^Bearer\s+(.+)$/i.exec(header(headers, 'authorization')?.trim() ?? '')?.[1] ?? '';
   if (!safeEqual(bearer, token)) return false;
-  const signature = header(headers, 'x-signature')?.trim().toLowerCase();
-  if (!signature) return !requireSignature;
-  return safeEqual(signature, signSteadfastWebhook(rawBody, token));
+  return !requireSignature || checkSteadfastSignature(rawBody, headers, token) === 'valid';
 }
 
 // ─── Parsing ─────────────────────────────────────────────────────────────
@@ -168,8 +180,11 @@ export function parseSteadfastWebhook(body: unknown): SteadfastWebhookEvent {
   };
   if (typeof body !== 'object' || body === null || Array.isArray(body)) fail('body is not an object');
   const b = body as Record<string, unknown>;
-  const type = b.notification_type;
-  if (typeof type !== 'string' || !type) return fail('notification_type is missing');
+  // Absent on the push as Steadfast's own Laravel package documents it, which
+  // only ever carries a delivery status. Rejecting it would answer 4xx, which
+  // Steadfast never retries, so the event would be lost.
+  const type = b.notification_type ?? 'delivery_status';
+  if (typeof type !== 'string' || !type) return fail('notification_type is not a non-empty string');
 
   if (type !== 'delivery_status' && type !== 'tracking_update') {
     return { notification_type: type, raw: b };
@@ -212,6 +227,8 @@ export type WebhookResult =
       event: SteadfastWebhookEvent;
       /** Store this; a retried event repeats it. Undefined if Steadfast omitted it. */
       idempotencyKey: string | undefined;
+      /** Log this; once live events show 'valid', you can set `requireSignature`. */
+      signature: SignatureCheck;
       httpStatus: 200;
       response: { status: 'success' };
     }
@@ -245,6 +262,7 @@ export function handleSteadfastWebhook(
       ok: true,
       event: parseSteadfastWebhook(parsed),
       idempotencyKey: header(input.headers, 'idempotency-key'),
+      signature: checkSteadfastSignature(input.rawBody, input.headers, input.token),
       httpStatus: 200,
       response: { status: 'success' },
     };

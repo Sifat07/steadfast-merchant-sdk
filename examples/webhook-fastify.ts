@@ -26,10 +26,12 @@ await app.register(async (scope) => {
     const result = handleSteadfastWebhook({ rawBody: req.body as Buffer, headers: req.headers, token });
 
     if (!result.ok) {
-      // 4xx: Steadfast won't retry, which is right — a bad signature won't improve.
+      // 4xx: Steadfast won't retry, which is right — a wrong token won't improve.
       req.log.warn({ reason: result.error.reason }, result.error.message);
       return reply.code(result.httpStatus).send(result.response);
     }
+    // Once this logs 'valid' on live events, you can pass requireSignature: true.
+    if (result.signature !== 'valid') req.log.info({ signature: result.signature }, 'Steadfast X-Signature not valid');
 
     // Retries repeat the Idempotency-Key. Record it before doing the work.
     const key = result.idempotencyKey;
