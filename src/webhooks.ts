@@ -15,7 +15,8 @@
  * record the event by Idempotency-Key, answer 200, and do slow work after.
  *
  * The auth token is optional in the merchant panel. Without one there is
- * nothing to check, and this module refuses every request — set a token.
+ * nothing to check, so verifying or handling with an empty token throws (your
+ * framework answers 5xx, which Steadfast retries) — set a token.
  *
  * The Bearer token is always required, and it is the authentication.
  * `X-Signature` is keyed with that same token, so a matching signature proves
@@ -72,9 +73,11 @@ export interface DeliveryStatusEvent {
    * Taka. For `partial_delivered`, what the rider actually collected.
    * Passed through as sent: bookings take whole taka, but nothing guarantees
    * a push does, so check `Number.isInteger` before settling against it.
+   * `null` when Steadfast sent no amount — unknown, not ৳0.
    */
-  cod_amount: number;
-  delivery_charge: number;
+  cod_amount: number | null;
+  /** Taka. `null` when Steadfast sent none. */
+  delivery_charge: number | null;
   tracking_message?: string;
   updated_at: string;
 }
@@ -165,9 +168,13 @@ export function verifySteadfastWebhook(
 
 // ─── Parsing ─────────────────────────────────────────────────────────────
 
-/** Taka as Steadfast sends it: a number or a numeric string. Refuses anything else. */
-function taka(value: unknown, field: string, fail: (msg: string) => never): number {
-  if (value === undefined || value === null || value === '') return 0;
+/**
+ * Taka as Steadfast sends it: a number or a numeric string. Absent is `null`,
+ * never 0 — a missing collection figure must not read as "collected nothing".
+ * Refuses anything else.
+ */
+function taka(value: unknown, field: string, fail: (msg: string) => never): number | null {
+  if (value === undefined || value === null || value === '') return null;
   const n = typeof value === 'string' ? Number(value.trim()) : value;
   if (typeof n !== 'number' || !Number.isFinite(n) || n < 0) return fail(`unusable ${field}`);
   return n;
@@ -190,8 +197,12 @@ export function parseSteadfastWebhook(body: unknown): SteadfastWebhookEvent {
     return { notification_type: type, raw: b };
   }
 
-  const consignmentId = Number(b.consignment_id);
-  if (b.consignment_id == null || !Number.isInteger(consignmentId)) fail('consignment_id is missing');
+  // A number or a digit string only: Number() alone turns '', '  ' and [] into
+  // 0 and true into 1, which would point the event at the wrong parcel.
+  const cid = b.consignment_id;
+  const consignmentId =
+    typeof cid === 'number' ? cid : typeof cid === 'string' && /^\s*\d+\s*$/.test(cid) ? Number(cid) : NaN;
+  if (!Number.isSafeInteger(consignmentId) || consignmentId <= 0) fail('consignment_id is missing or not a positive integer');
   if (typeof b.invoice !== 'string') fail('invoice is missing');
   const updatedAt = typeof b.updated_at === 'string' ? b.updated_at : '';
 
