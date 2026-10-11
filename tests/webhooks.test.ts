@@ -110,6 +110,26 @@ describe('parseSteadfastWebhook', () => {
     expect(parseSteadfastWebhook({ ...deliveryStatus, cod_amount: '10.5' })).toMatchObject({ cod_amount: 10.5 });
   });
 
+  it('reads a missing amount as null, never as ৳0', () => {
+    const { cod_amount: _c, delivery_charge: _d, ...noAmounts } = deliveryStatus;
+    expect(parseSteadfastWebhook({ ...noAmounts, status: 'partial_delivered' })).toMatchObject({
+      cod_amount: null,
+      delivery_charge: null,
+    });
+    expect(parseSteadfastWebhook({ ...deliveryStatus, cod_amount: null, delivery_charge: '' })).toMatchObject({
+      cod_amount: null,
+      delivery_charge: null,
+    });
+    expect(parseSteadfastWebhook({ ...deliveryStatus, cod_amount: 0 })).toMatchObject({ cod_amount: 0 });
+  });
+
+  it('takes consignment_id as a number or a digit string only', () => {
+    expect(parseSteadfastWebhook({ ...deliveryStatus, consignment_id: ' 12345 ' })).toMatchObject({ consignment_id: 12345 });
+    for (const bad of ['', '  ', true, [], 0, -1, 1.5, '12a', '1e3', null]) {
+      expect(() => parseSteadfastWebhook({ ...deliveryStatus, consignment_id: bad })).toThrow(/consignment_id/);
+    }
+  });
+
   it('parses a tracking_update event', () => {
     const event = parseSteadfastWebhook({
       notification_type: 'tracking_update',

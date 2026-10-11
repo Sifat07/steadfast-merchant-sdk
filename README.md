@@ -83,7 +83,7 @@ new SteadfastClient({
   apiKey: string,         // required
   secretKey: string,      // required
   baseUrl?: string,       // default 'https://portal.packzy.com/api/v1'
-  timeoutMs?: number,     // default 30000, per request
+  timeoutMs?: number,     // default 30000, per request, including reading the reply
   fetch?: typeof fetch,   // inject for tests, proxies or logging
 });
 ```
@@ -244,7 +244,7 @@ Refused with `validation` (422) for a parcel already delivered or already coming
 
 #### `getPayment(paymentId)`
 
-`GET /payments/{id}` — one payout with every parcel it settled, each with its `invoice`. Use it to reconcile against your orders. Accepts `'SFC-88213'` or `88213` (non-digits are dropped). Returned as an untyped object for now ([why](#whats-verified)).
+`GET /payments/{id}` — one payout with every parcel it settled, each with its `invoice`. Use it to reconcile against your orders. Accepts `'SFC-88213'` or `88213`; anything else is a `validation` error rather than a guess at another payout. Returned as an untyped object for now ([why](#whats-verified)).
 
 ### Lookups
 
@@ -345,7 +345,7 @@ if (result.ok) {
   result.signature;            // 'valid' | 'invalid' | 'absent' — log it, see below
   if (isDeliveryStatusEvent(result.event)) {
     result.event.status;       // 'delivered', 'partial_delivered', 'cancelled', …
-    result.event.cod_amount;   // for partial_delivered: what was actually collected
+    result.event.cod_amount;   // for partial_delivered: what was actually collected; null if not sent
   }
 }
 reply.status(result.httpStatus).send(result.response);
@@ -368,7 +368,7 @@ reply.status(result.httpStatus).send(result.response);
 
 A body without `notification_type` is read as `delivery_status`: Steadfast's Laravel package documents the push in that shape, and a 400 would lose it for good.
 
-Statuses are passed through exactly as sent (lower-cased). Unknown ones aren't rejected or rewritten. Amounts may arrive as numbers or numeric strings; anything else answers 400. Bookings take whole taka, but a webhook `cod_amount` is passed through as sent, fractions included, so check `Number.isInteger` before settling against it.
+Statuses are passed through exactly as sent (lower-cased). Unknown ones aren't rejected or rewritten. `consignment_id` must be a positive whole number or a digit string. Amounts may arrive as numbers or numeric strings; anything else answers 400. A missing amount is `null`, not `0`: unknown is not "collected nothing". Bookings take whole taka, but a webhook `cod_amount` is passed through as sent, fractions included, so check `Number.isInteger` before settling against it.
 
 Lower-level pieces, if you need them: `verifySteadfastWebhook(rawBody, headers, token, options)`, `parseSteadfastWebhook(body)` and `signSteadfastWebhook(rawBody, token)` (useful for tests).
 

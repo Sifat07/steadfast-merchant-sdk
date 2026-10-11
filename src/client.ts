@@ -178,6 +178,7 @@ export class SteadfastClient {
   async createPickupRequest(req: CreatePickupRequest, opts?: CallOptions): Promise<PickupRequest> {
     const phone = normalizeBdPhone(req.contact_number);
     if (!phone) throw new SteadfastError('validation', 'contact_number is not a valid BD mobile number');
+    if (!req.address?.trim()) throw new SteadfastError('validation', 'address is required');
     checkLength('address', req.address, 255);
     if (req.note !== undefined) checkLength('note', req.note, 500);
     const body = await this.request('POST', '/create_pickup_request', opts, { ...req, contact_number: phone });
@@ -241,8 +242,10 @@ export class SteadfastClient {
    * orders. Pass `SFC-88213` or `88213`. Unverified shape: returned as sent.
    */
   async getPayment(paymentId: string | number, opts?: CallOptions): Promise<Record<string, unknown>> {
-    const digits = String(paymentId).replace(/\D/g, '');
-    if (!digits) throw new SteadfastError('validation', 'payment id has no digits');
+    // Only the two documented forms: stripping every non-digit would turn a
+    // typo like `12abc34` into some other payout, `1234`.
+    const digits = /^(?:SFC-)?(\d+)$/i.exec(String(paymentId).trim())?.[1];
+    if (!digits) throw new SteadfastError('validation', 'payment id must look like SFC-88213 or 88213');
     return (await this.request('GET', `/payments/${digits}`, opts)) as Record<string, unknown>;
   }
 
@@ -284,6 +287,10 @@ export class SteadfastClient {
   ): Promise<unknown> {
     const { signal, cleanup } = combineSignals(this.timeoutMs, opts?.signal);
     let res: Response;
+    let text: string;
+    // The body is read inside the timeout too: a proxy can send headers and
+    // then stall. A failure here, even after headers, leaves a create in doubt,
+    // so it's `unavailable` (retry with the same invoice), never a raw error.
     try {
       res = await this.fetchImpl(`${this.baseUrl}${path}`, {
         method,
@@ -298,14 +305,18 @@ export class SteadfastClient {
         redirect: 'error',
         signal,
       });
+      text = await res.text();
     } catch (cause) {
-      const aborted = opts?.signal?.aborted;
-      throw new SteadfastError('unavailable', aborted ? 'request aborted' : `request to ${path} failed`, { cause });
+      const message = opts?.signal?.aborted
+        ? 'request aborted'
+        : signal.aborted
+          ? `request to ${path} timed out after ${this.timeoutMs} ms`
+          : `request to ${path} failed`;
+      throw new SteadfastError('unavailable', message, { cause });
     } finally {
       cleanup();
     }
 
-    const text = await res.text();
     let body: unknown = text;
     try {
       body = text ? JSON.parse(text) : null;

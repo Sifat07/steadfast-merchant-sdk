@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { SteadfastClient, normalizeBdPhone } from '../src';
+import { SteadfastClient, SteadfastError, normalizeBdPhone } from '../src';
 
 type Reply = { status?: number; body: unknown };
 
@@ -322,7 +322,48 @@ describe('SteadfastClient', () => {
       new Promise<Response>((_, reject) => init.signal?.addEventListener('abort', () => reject(init.signal?.reason))),
     );
     const sf = new SteadfastClient({ apiKey: 'k', secretKey: 's', timeoutMs: 10, fetch: hang as unknown as typeof fetch });
-    await expect(sf.getBalance()).rejects.toMatchObject({ kind: 'unavailable' });
+    await expect(sf.getBalance()).rejects.toMatchObject({ kind: 'unavailable', message: /timed out after 10 ms/ });
+  });
+
+  it('times out a body that stalls after the headers', async () => {
+    // Headers arrive, then nothing: the stream only ends when fetch's signal aborts.
+    const stall = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = new ReadableStream({
+        start(c) {
+          init.signal?.addEventListener('abort', () => c.error(init.signal?.reason));
+        },
+      });
+      return new Response(body, { status: 200 });
+    });
+    const sf = new SteadfastClient({ apiKey: 'k', secretKey: 's', timeoutMs: 10, fetch: stall as unknown as typeof fetch });
+    await expect(sf.getBalance()).rejects.toMatchObject({ kind: 'unavailable', retryable: true, message: /timed out/ });
+  });
+
+  it('reports a body that fails mid-read as unavailable, not a raw error', async () => {
+    const broken = async () =>
+      new Response(new ReadableStream({ start: (c) => c.error(new TypeError('socket reset')) }), { status: 200 });
+    const sf = new SteadfastClient({ apiKey: 'k', secretKey: 's', fetch: broken as unknown as typeof fetch });
+    const err = await sf.createOrder(order).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(SteadfastError);
+    expect(err).toMatchObject({ kind: 'unavailable', retryable: true });
+  });
+
+  it('requires a pickup address', async () => {
+    const { sf, fetchMock } = client();
+    const pickup = { address_id: 1, police_station_id: 1, address: '  ', contact_number: '01712345678' };
+    await expect(sf.createPickupRequest(pickup)).rejects.toThrow(/address is required/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('takes a payment id only in its documented forms', async () => {
+    const { sf, call } = client({ body: {} }, { body: {} });
+    await sf.getPayment('sfc-88213');
+    await sf.getPayment(' 88213 ');
+    expect(call(0).url).toMatch(/\/payments\/88213$/);
+    expect(call(1).url).toMatch(/\/payments\/88213$/);
+    for (const bad of ['12abc34', 'SFC 88213', 'ABC-88213', '']) {
+      await expect(sf.getPayment(bad)).rejects.toMatchObject({ kind: 'validation' });
+    }
   });
 });
 
