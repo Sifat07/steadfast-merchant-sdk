@@ -167,6 +167,15 @@ describe('SteadfastClient', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('counts an emoji as one character against the limits', async () => {
+    const { sf, fetchMock, call } = client();
+    const atLimit = `${'a'.repeat(99)}😀`; // 100 characters, 101 UTF-16 units
+    await sf.createOrder({ ...order, recipient_name: atLimit }).catch(() => {});
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(call().json.recipient_name).toBe(atLimit);
+    await expect(sf.createOrder({ ...order, recipient_name: `${atLimit}😀` })).rejects.toThrow(/truncate/);
+  });
+
   it('looks up status by consignment, invoice and tracking code', async () => {
     const ok = { body: { status: 200, delivery_status: 'delivered_approval_pending' } };
     const { sf, call } = client(ok, ok, ok);

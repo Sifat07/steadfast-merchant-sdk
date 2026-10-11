@@ -371,7 +371,8 @@ function validateOrder(order: CreateOrderRequest): CreateOrderRequest {
 }
 
 function checkLength(field: string, value: string, max: number): void {
-  if (value.length > max) {
+  // Code points, not UTF-16 units: an emoji is one character, not two.
+  if ([...value].length > max) {
     throw new SteadfastError('validation', `${field} is longer than ${max} characters (Steadfast would truncate it)`);
   }
 }

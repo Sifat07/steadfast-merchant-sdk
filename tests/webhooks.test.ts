@@ -47,9 +47,11 @@ describe('verifySteadfastWebhook', () => {
     expect(verifySteadfastWebhook(Buffer.from(rawBody), upper, TOKEN)).toBe(true);
   });
 
-  it('rejects a body changed after signing (e.g. re-serialised JSON)', () => {
+  it('with requireSignature, rejects a body changed after signing (e.g. re-serialised JSON)', () => {
     const { rawBody, headers } = signed(deliveryStatus);
-    expect(verifySteadfastWebhook(JSON.stringify(JSON.parse(rawBody), null, 2), headers, TOKEN)).toBe(false);
+    const reserialised = JSON.stringify(JSON.parse(rawBody), null, 2);
+    expect(verifySteadfastWebhook(reserialised, headers, TOKEN, { requireSignature: true })).toBe(false);
+    expect(verifySteadfastWebhook(reserialised, headers, TOKEN)).toBe(true);
   });
 
   it('rejects a wrong token or a missing bearer', () => {
@@ -67,9 +69,14 @@ describe('verifySteadfastWebhook', () => {
     expect(verifySteadfastWebhook(rawBody, headers, TOKEN, { requireSignature: true })).toBe(true);
   });
 
-  it('rejects a present-but-wrong signature even with a good bearer', () => {
+  it('does not reject a wrong signature unless requireSignature is set', () => {
+    // The HMAC is keyed with the bearer itself, so it authenticates nothing
+    // extra, and a 401 is never retried: enforcing a misread recipe would drop
+    // every event.
     const { rawBody, headers } = signed(deliveryStatus);
-    expect(verifySteadfastWebhook(rawBody, { ...headers, 'x-signature': 'ab'.repeat(32) }, TOKEN)).toBe(false);
+    const wrong = { ...headers, 'x-signature': 'ab'.repeat(32) };
+    expect(verifySteadfastWebhook(rawBody, wrong, TOKEN)).toBe(true);
+    expect(verifySteadfastWebhook(rawBody, wrong, TOKEN, { requireSignature: true })).toBe(false);
   });
 
   it('refuses to run without a configured token', () => {
@@ -85,6 +92,22 @@ describe('parseSteadfastWebhook', () => {
       consignment_id: 12345,
       cod_amount: 1500,
     });
+  });
+
+  it('reads a body without notification_type as a delivery status', () => {
+    // Steadfast's own Laravel package documents the push without the field,
+    // and a 400 is never retried: rejecting it would drop the event.
+    const { notification_type: _type, ...untyped } = deliveryStatus;
+    expect(parseSteadfastWebhook(untyped)).toMatchObject({
+      notification_type: 'delivery_status',
+      status: 'delivered',
+      invoice: 'INV-67890',
+    });
+    expect(() => parseSteadfastWebhook({ ...untyped, status: undefined })).toThrow(/status is missing/);
+  });
+
+  it('passes a fractional cod_amount through as sent', () => {
+    expect(parseSteadfastWebhook({ ...deliveryStatus, cod_amount: '10.5' })).toMatchObject({ cod_amount: 10.5 });
   });
 
   it('parses a tracking_update event', () => {
@@ -124,7 +147,8 @@ describe('parseSteadfastWebhook', () => {
   it.each([
     [null, /not an object/],
     [[], /not an object/],
-    [{ ...deliveryStatus, notification_type: undefined }, /notification_type/],
+    [{ ...deliveryStatus, notification_type: 7 }, /notification_type/],
+    [{ ...deliveryStatus, notification_type: '' }, /notification_type/],
     [{ ...deliveryStatus, consignment_id: undefined }, /consignment_id/],
     [{ ...deliveryStatus, invoice: 5 }, /invoice/],
     [{ ...deliveryStatus, status: '' }, /status is missing/],
@@ -137,15 +161,39 @@ describe('parseSteadfastWebhook', () => {
 });
 
 describe('handleSteadfastWebhook', () => {
-  it('answers 200 with the event and idempotency key for a good request', () => {
+  it('answers 200 with the event, idempotency key and signature check for a good request', () => {
     const result = handleSteadfastWebhook({ ...signed(deliveryStatus), token: TOKEN });
-    expect(result).toMatchObject({ ok: true, httpStatus: 200, idempotencyKey: 'evt-1', event: { status: 'delivered' } });
+    expect(result).toMatchObject({
+      ok: true,
+      httpStatus: 200,
+      idempotencyKey: 'evt-1',
+      signature: 'valid',
+      event: { status: 'delivered' },
+    });
   });
 
-  it('answers 401 for a bad signature without parsing', () => {
+  it('answers 200 for a bad or missing signature, and reports it', () => {
     const { rawBody, headers } = signed(deliveryStatus);
-    const result = handleSteadfastWebhook({ rawBody: `${rawBody} `, headers, token: TOKEN });
+    expect(handleSteadfastWebhook({ rawBody: `${rawBody} `, headers, token: TOKEN })).toMatchObject({
+      ok: true,
+      httpStatus: 200,
+      signature: 'invalid',
+    });
+    expect(handleSteadfastWebhook({ rawBody, headers: { ...headers, 'x-signature': undefined }, token: TOKEN })).toMatchObject({
+      ok: true,
+      signature: 'absent',
+    });
+  });
+
+  it('answers 401 for a bad signature with requireSignature, without parsing', () => {
+    const { rawBody, headers } = signed(deliveryStatus);
+    const result = handleSteadfastWebhook({ rawBody: `${rawBody} `, headers, token: TOKEN, requireSignature: true });
     expect(result).toMatchObject({ ok: false, httpStatus: 401 });
+  });
+
+  it('answers 401 for a wrong bearer', () => {
+    const { rawBody, headers } = signed(deliveryStatus, 'someone-else');
+    expect(handleSteadfastWebhook({ rawBody, headers, token: TOKEN })).toMatchObject({ ok: false, httpStatus: 401 });
   });
 
   it('answers 400 for a signed but malformed body', () => {

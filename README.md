@@ -322,7 +322,7 @@ Each request carries:
 | Header | Value |
 | --- | --- |
 | `Authorization` | `Bearer <your auth token>`. **Always checked.** |
-| `X-Signature` | Hex HMAC-SHA256 of the **raw body**, keyed with the token. Checked whenever present. |
+| `X-Signature` | Hex HMAC-SHA256 of the **raw body**, keyed with the token. Reported, enforced only with `requireSignature`. |
 | `Idempotency-Key` | The same value on every retry of one event |
 | `User-Agent` | `Steadfast-Webhook/1.0` |
 
@@ -342,6 +342,7 @@ const result = handleSteadfastWebhook({
 
 if (result.ok) {
   // dedupe on result.idempotencyKey
+  result.signature;            // 'valid' | 'invalid' | 'absent' — log it, see below
   if (isDeliveryStatusEvent(result.event)) {
     result.event.status;       // 'delivered', 'partial_delivered', 'cancelled', …
     result.event.cod_amount;   // for partial_delivered: what was actually collected
@@ -350,12 +351,12 @@ if (result.ok) {
 reply.status(result.httpStatus).send(result.response);
 ```
 
-**You need the raw body.** The signature covers the exact bytes. If a JSON parser runs first and you re-serialise its output, the signature won't match, even when the content is identical. Complete, tested setups:
+**You need the raw body** to check the signature. It covers the exact bytes. If a JSON parser runs first and you re-serialise its output, the signature won't match, even when the content is identical. Complete, tested setups:
 
 - **Fastify:** a buffer content-type parser scoped to the webhook route — [`examples/webhook-fastify.ts`](examples/webhook-fastify.ts)
 - **Express:** `express.raw({ type: 'application/json' })` on the route, mounted before any global `express.json()` — [`examples/webhook-express.ts`](examples/webhook-express.ts)
 
-**`requireSignature`:** the Bearer token is always required. `X-Signature` appears in Steadfast's 2026 guide but not in their Laravel package, so by default it's verified when present and not demanded when absent. Once you've seen it on your own live events, pass `requireSignature: true`. Don't turn it on before then: Steadfast never retries a 4xx, so requiring a header that doesn't arrive would drop every event.
+**`requireSignature`:** the Bearer token is always required, and it's what authenticates the request. `X-Signature` is keyed with that same token, so a matching signature proves nothing the Bearer check didn't. Its recipe also comes only from Steadfast's 2026 guide, not their Laravel package or live traffic. So by default a missing or mismatched signature doesn't fail the request; it's reported as `result.signature`. Once your live events show `'valid'`, you can pass `requireSignature: true`. Don't turn it on before then: Steadfast never retries a 4xx, so a misread recipe, or a framework that re-serialises the body, would drop every event.
 
 ### Events
 
@@ -365,7 +366,9 @@ reply.status(result.httpStatus).send(result.response);
 | `tracking_update` | `TrackingUpdateEvent` | A new tracking step: `consignment_id`, `invoice`, `tracking_message`, `updated_at` |
 | `consignment_update`, `return_list_accepted`, `payment_request`, `cancel_request`, `return_request`, `pickup_request`, `user_update` | `UntypedEvent` (`{ notification_type, raw }`) | Listed by Steadfast, payloads not documented yet |
 
-Statuses are passed through exactly as sent (lower-cased). Unknown ones aren't rejected or rewritten. Amounts may arrive as numbers or numeric strings; anything else answers 400.
+A body without `notification_type` is read as `delivery_status`: Steadfast's Laravel package documents the push in that shape, and a 400 would lose it for good.
+
+Statuses are passed through exactly as sent (lower-cased). Unknown ones aren't rejected or rewritten. Amounts may arrive as numbers or numeric strings; anything else answers 400. Bookings take whole taka, but a webhook `cod_amount` is passed through as sent, fractions included, so check `Number.isInteger` before settling against it.
 
 Lower-level pieces, if you need them: `verifySteadfastWebhook(rawBody, headers, token, options)`, `parseSteadfastWebhook(body)` and `signSteadfastWebhook(rawBody, token)` (useful for tests).
 
