@@ -1,6 +1,7 @@
 # Steadfast Merchant SDK
 
 [![npm](https://img.shields.io/npm/v/steadfast-merchant-sdk)](https://www.npmjs.com/package/steadfast-merchant-sdk)
+[![npm downloads](https://img.shields.io/npm/dm/steadfast-merchant-sdk)](https://www.npmjs.com/package/steadfast-merchant-sdk)
 [![CI](https://github.com/Sifat07/steadfast-merchant-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/Sifat07/steadfast-merchant-sdk/actions/workflows/ci.yml)
 [![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -14,6 +15,7 @@ An **unofficial**, zero-dependency TypeScript SDK for the [Steadfast Courier](ht
 - **Fails loudly:** Steadfast *truncates* over-long values instead of rejecting them, so the SDK checks limits before sending.
 - **Safe retries:** typed errors with a `kind`. `duplicate` tells you an earlier attempt already booked the parcel.
 - **Signed webhooks:** Bearer token plus HMAC `X-Signature`, framework-agnostic, with retry dedupe via `Idempotency-Key`.
+- **Pathao too?** See the sibling [Pathao Merchant SDK](https://github.com/Sifat07/pathao-merchant-sdk).
 
 ## Contents
 
